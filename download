@@ -1,0 +1,256 @@
+#!/usr/bin/env python3
+"""
+gerar_dashboard.py
+==================
+Lê a planilha de dados do Pedido Perfeito e gera o data.json
+atualizado na pasta public/.
+
+Uso:
+    python3 scripts/gerar_dashboard.py PLANILHA.xlsx
+
+Exemplo:
+    python3 scripts/gerar_dashboard.py planilha_pedido_perfeito.xlsx
+"""
+
+import sys, json, re, math
+from pathlib import Path
+from collections import defaultdict
+
+try:
+    import pandas as pd
+except ImportError:
+    print("Instale as dependências: pip install pandas openpyxl pyxlsb")
+    sys.exit(1)
+
+
+# ── Mapeamentos ─────────────────────────────────────────────────────────────
+SEMANA_MES = {
+    **{f'S0{i}': '01' for i in range(1, 4)},
+    **{f'S0{i}': '02' for i in range(4, 8)},
+    **{f'S0{i}': '03' for i in range(8, 13)},
+    **{f'S0{i}': '04' for i in range(13, 19)},
+    **{f'S{i}':  '04' for i in range(13, 19)},
+    'S019': '05', 'S020': '05', 'S021': '05',
+    'S19':  '05', 'S20':  '05', 'S21':  '05',
+}
+
+MES_LABELS = {
+    '01': 'Janeiro', '02': 'Fevereiro', '03': 'Março',
+    '04': 'Abril',   '05': 'Maio',       '06': 'Junho',
+    '07': 'Julho',   '08': 'Agosto',     '09': 'Setembro',
+    '10': 'Outubro', '11': 'Novembro',   '12': 'Dezembro',
+}
+
+CLASSIF_MAP = {
+    'Pedido Perfeito':  'pp',
+    'Pedido Completo':  'pc',
+    'Pedido Incompleto':'inc',
+}
+
+CANAL_MAP = {'1P.Site': 0, '3P.iFood': 1}
+DIA_MAP   = {'segunda-feira':0,'terça-feira':1,'quarta-feira':2,
+             'quinta-feira':3,'sexta-feira':4,'sábado':5,'domingo':6}
+
+
+def si(v):
+    try:
+        if v is None or (isinstance(v, float) and math.isnan(v)): return 0
+        return int(float(v))
+    except:
+        return 0
+
+
+def normalizar_semana(s):
+    """Normaliza S01/S001/S1 → S01 etc."""
+    s = str(s).strip()
+    m = re.match(r'S0*(\d+)', s, re.IGNORECASE)
+    if not m: return s
+    n = int(m.group(1))
+    return f'S0{n}' if n < 10 else f'S{n}'
+
+
+def ler_xlsb(path):
+    """Lê arquivo .xlsb retornando DataFrame da aba dash.consolidado.OP"""
+    try:
+        from pyxlsb import open_workbook
+    except ImportError:
+        print("Para .xlsb instale: pip install pyxlsb")
+        sys.exit(1)
+
+    rows, headers = [], None
+    with open_workbook(str(path)) as wb:
+        with wb.get_sheet('dash.consolidado.OP') as ws:
+            for i, row in enumerate(ws.rows()):
+                vals = [c.v for c in row][:9]
+                if i == 3:
+                    headers = vals
+                elif i > 3 and any(v is not None for v in vals):
+                    rows.append(vals)
+
+    df = pd.DataFrame(rows, columns=headers)
+    return df
+
+
+def ler_xlsx(path):
+    """Lê arquivo .xlsx com abas '1P - Dados por Semana' e '3P - Dados por Semana'"""
+    rows = []
+    for canal_str, sheet in [('1P.Site', '1P - Dados por Semana'),
+                              ('3P.iFood', '3P - Dados por Semana')]:
+        try:
+            df = pd.read_excel(path, sheet_name=sheet)
+        except Exception:
+            print(f"  Aba '{sheet}' não encontrada — pulando.")
+            continue
+
+        for _, row in df.iterrows():
+            loja   = str(row.get('Operações (Loja)', '')).strip()
+            semana = normalizar_semana(str(row.get('Semana', '')))
+            pp     = si(row.get('Pedido Perfeito'))
+            pc     = si(row.get('Pedido Completo'))
+            inc    = si(row.get('Pedido Incompleto'))
+            if not loja or loja == 'nan': continue
+
+            mes = SEMANA_MES.get(semana, '05')
+            # Gera datas sintéticas por semana (para manter granularidade diária)
+            data_str = f'semana-{semana}'
+            dia_str  = 'segunda-feira'
+
+            for classif, key in [('Pedido Perfeito', pp),
+                                  ('Pedido Completo', pc),
+                                  ('Pedido Incompleto', inc)]:
+                for _ in range(key):
+                    rows.append({
+                        '[ADD] Data':           data_str,
+                        'Dia Semana':           dia_str,
+                        '[ADD] Mês.1P':         mes,
+                        '[ADD] Semana':         semana,
+                        '[ADD] Nome OP':        loja,
+                        '[ADD] Classif. Pedido':classif,
+                        'Nº Pedido':            f'auto-{len(rows)}',
+                        '[ADD] Status Pedido':  'delivered',
+                        'Canal':                canal_str,
+                    })
+
+    return pd.DataFrame(rows)
+
+
+def processar(df):
+    """Converte DataFrame bruto em formato compacto arrays-de-arrays."""
+    df = df.rename(columns={
+        '[ADD] Data':            'data',
+        'Dia Semana':            'dia_semana',
+        '[ADD] Mês.1P':          'mes',
+        '[ADD] Semana':          'semana',
+        '[ADD] Nome OP':         'loja',
+        '[ADD] Classif. Pedido': 'classif',
+        'Nº Pedido':             'pedido_num',
+        '[ADD] Status Pedido':   'status',
+        'Canal':                 'canal',
+    })
+
+    df = df[df['classif'].isin(CLASSIF_MAP.keys())].copy()
+    df = df[df['loja'].notna() & (df['loja'] != '-')].copy()
+    df['semana'] = df['semana'].apply(normalizar_semana)
+
+    # Dimensões
+    lojas   = sorted(df['loja'].unique())
+    semanas = sorted(df['semana'].unique(),
+                     key=lambda s: int(re.sub(r'S0?', '', s) or '0'))
+    datas   = sorted(df['data'].unique())
+    dias    = ['segunda-feira','terça-feira','quarta-feira',
+               'quinta-feira','sexta-feira','sábado','domingo']
+    meses   = sorted(df['mes'].unique())
+
+    l_idx = {l: i for i, l in enumerate(lojas)}
+    s_idx = {s: i for i, s in enumerate(semanas)}
+    d_idx = {d: i for i, d in enumerate(datas)}
+    m_idx = {m: i for i, m in enumerate(meses)}
+
+    # Agrega por (loja, data, mes, semana, dia, canal)
+    agg = defaultdict(lambda: {'pp': 0, 'pc': 0, 'inc': 0})
+    for _, row in df.iterrows():
+        key = (
+            l_idx[row['loja']],
+            d_idx[row['data']],
+            m_idx.get(row['mes'], 0),
+            s_idx[row['semana']],
+            DIA_MAP.get(str(row['dia_semana']).lower(), 0),
+            CANAL_MAP.get(row['canal'], 0),
+        )
+        c = CLASSIF_MAP[row['classif']]
+        agg[key][c] += 1
+
+    rows_compact = []
+    for (li, di, mi, si2, dia_i, ci), v in agg.items():
+        rows_compact.append([li, di, mi, si2, dia_i, ci,
+                              v['pp'], v['pc'], v['inc']])
+
+    sem_mes = {s: SEMANA_MES.get(s, meses[0] if meses else '05')
+               for s in semanas}
+
+    return {
+        'rows':      rows_compact,
+        'lojas':     lojas,
+        'datas':     datas,
+        'semanas':   semanas,
+        'dias':      dias,
+        'meses':     meses,
+        'mesLabels': MES_LABELS,
+        'semMes':    sem_mes,
+    }
+
+
+def main():
+    if len(sys.argv) < 2:
+        print(__doc__)
+        sys.exit(1)
+
+    planilha = Path(sys.argv[1])
+    if not planilha.exists():
+        print(f"Arquivo não encontrado: {planilha}")
+        sys.exit(1)
+
+    print(f"Lendo {planilha}...")
+    ext = planilha.suffix.lower()
+
+    if ext == '.xlsb':
+        df = ler_xlsb(planilha)
+    elif ext in ('.xlsx', '.xls'):
+        # Tenta ler como template de abas OU como arquivo consolidado
+        xl = pd.ExcelFile(planilha)
+        if '1P - Dados por Semana' in xl.sheet_names:
+            print("  Formato: planilha template (abas 1P/3P)")
+            df = ler_xlsx(planilha)
+        elif 'dash.consolidado.OP' in xl.sheet_names:
+            print("  Formato: planilha consolidada")
+            df = pd.read_excel(planilha, sheet_name='dash.consolidado.OP', header=3)
+        else:
+            print(f"  Abas disponíveis: {xl.sheet_names}")
+            print("  Nenhuma aba reconhecida. Use a planilha template ou o arquivo .xlsb.")
+            sys.exit(1)
+    else:
+        print(f"Formato não suportado: {ext}")
+        sys.exit(1)
+
+    print(f"  {len(df):,} linhas lidas")
+
+    print("Processando...")
+    data = processar(df)
+
+    out = Path(__file__).parent.parent / 'public' / 'data.json'
+    out.parent.mkdir(parents=True, exist_ok=True)
+    with open(out, 'w', encoding='utf-8') as f:
+        json.dump(data, f, ensure_ascii=False, separators=(',', ':'))
+
+    size = out.stat().st_size
+    print(f"✓ {out} gerado — {size/1024:.0f} KB")
+    print(f"  {len(data['lojas'])} lojas · {len(data['semanas'])} semanas · {len(data['rows']):,} linhas compactas")
+    print()
+    print("Próximo passo:")
+    print("  git add public/data.json")
+    print("  git commit -m \"Atualização semana $(date +%Y-%m-%d)\"")
+    print("  git push")
+
+
+if __name__ == '__main__':
+    main()

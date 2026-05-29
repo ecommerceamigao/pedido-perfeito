@@ -1,0 +1,146 @@
+# Dashboard Pedido Perfeito — Grupo Amigão
+
+Painel operacional de fulfillment para acompanhamento dos indicadores
+**Pedido Perfeito** e **Pedido Completo** das lojas Amigão, nos canais
+Site 1P (e-commerce) e iFood 3P (marketplace).
+
+---
+
+## Estrutura do projeto
+
+```
+pedido-perfeito/
+├── public/               ← arquivos servidos pelo Vercel
+│   ├── index.html        ← HTML do dashboard
+│   ├── dashboard.css     ← estilos
+│   ├── dashboard.js      ← lógica JS (filtros, gráficos, ranking)
+│   ├── data.json         ← dados compactos (atualizado semanalmente)
+│   ├── logo_amigao.png
+│   └── logo_pedido_perfeito.png
+├── scripts/
+│   └── gerar_dashboard.py  ← script de atualização dos dados
+├── .gitignore
+├── package.json
+├── vercel.json
+└── README.md
+```
+
+---
+
+## Configuração inicial (fazer uma vez)
+
+### 1. Pré-requisitos
+
+- [Git](https://git-scm.com/downloads)
+- [Python 3.9+](https://python.org)
+- Conta no [GitHub](https://github.com) (gratuita)
+- Conta no [Vercel](https://vercel.com) (gratuita — faça login com o GitHub)
+
+### 2. Instalar dependências Python
+
+```bash
+pip install pandas openpyxl pyxlsb
+```
+
+### 3. Criar repositório no GitHub
+
+1. Acesse [github.com/new](https://github.com/new)
+2. Nome: `pedido-perfeito`
+3. Visibilidade: **Public** (necessário para o Vercel gratuito)
+4. Clique em **Create repository**
+
+### 4. Subir o projeto
+
+```bash
+cd pedido-perfeito
+git init
+git add .
+git commit -m "Configuração inicial do dashboard"
+git branch -M main
+git remote add origin https://github.com/SEU-USUARIO/pedido-perfeito.git
+git push -u origin main
+```
+
+### 5. Conectar ao Vercel
+
+1. Acesse [vercel.com](https://vercel.com) → **Add New Project**
+2. Importe o repositório `pedido-perfeito` do GitHub
+3. Configurações (deixar como estão — o `vercel.json` já cuida de tudo):
+   - Framework Preset: **Other**
+   - Output Directory: `public`
+4. Clique em **Deploy**
+
+Em ~30 segundos o site estará disponível em:
+```
+https://pedido-perfeito.vercel.app
+```
+
+> **Domínio personalizado**: em Vercel → Project → Settings → Domains
+> você pode adicionar `pedidoperfeito.amigao.com.br` se tiver o DNS configurado.
+
+---
+
+## Atualização semanal (rotina de ~5 minutos)
+
+### Usando a planilha template (recomendado)
+
+1. Preencha os dados da semana na planilha `template_pedido_perfeito.xlsx`
+2. Rode o script:
+
+```bash
+python3 scripts/gerar_dashboard.py caminho/para/planilha.xlsx
+```
+
+3. Suba as mudanças:
+
+```bash
+git add public/data.json
+git commit -m "Atualização semana S022 — 2025-06-02"
+git push
+```
+
+O Vercel detecta o push automaticamente e publica em ~30 segundos.
+**O link das lojas não muda.**
+
+### Usando o arquivo .xlsb consolidado
+
+```bash
+python3 scripts/gerar_dashboard.py DATA_Dash_OP_Pedido_Perfeito_CO.xlsb
+```
+
+O script reconhece automaticamente o formato do arquivo.
+
+---
+
+## Metas do programa
+
+| Canal | Pedido Perfeito | Pedido Completo |
+|-------|----------------|----------------|
+| 🛒 Site 1P | ≥ 85% | ≥ 95% |
+| 🛵 iFood 3P | ≥ 60% | ≥ 80% |
+
+---
+
+## Como os indicadores são calculados
+
+```
+% Pedido Perfeito  = Pedidos Perfeitos ÷ Total de Pedidos
+% Pedido Completo  = (PP + PC) ÷ Total de Pedidos
+```
+
+> **Nunca** se faz média de percentuais. Sempre soma os numeradores e
+> divide pelo total — conforme a fórmula da planilha Excel de referência.
+
+---
+
+## Filtros disponíveis no dashboard
+
+- **Canal**: Todos / Site 1P / iFood 3P
+- **Período**: Dia / Semana / Mês
+- **Loja**: lista unificada com todas as unidades
+
+---
+
+## Suporte
+
+Dúvidas sobre a configuração: fale com o time de e-commerce do Grupo Amigão.

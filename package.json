@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.env
+venv/
+.venv/
+
+# Node
+node_modules/
+.npm
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Vercel
+.vercel/
+
+# Planilhas com dados sensíveis (não versionar)
+*.xlsb
+*.xlsm
+
+# Manter apenas a planilha template
+!scripts/template_pedido_perfeito.xlsx
